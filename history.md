@@ -2,11 +2,7 @@
 ▝▜█████▛▘  Sonnet 4.6 · Claude Pro
   ▘▘ ▝▝    D:\Andriiproj\PrPython\Time-Series-Analysis-of-air-raid-alerts-i…
 
-
-
- ▐▛███▜▌   Claude Code v2.1.183
-▝▜█████▛▘  Sonnet 4.6 · Claude Pro
-  ▘▘ ▝▝    D:\Andriiproj\PrPython\Time-Series-Analysis-of-air-raid-alerts-i…
+  https://claude.ai/share/edd871d1-ba6f-43a7-95ce-eb1d267354ca - **Starting chat, with creation of architecture**
 
 
 ❯ okay, read the CLAUDE.md file and propose me a list of steps to complete the  
