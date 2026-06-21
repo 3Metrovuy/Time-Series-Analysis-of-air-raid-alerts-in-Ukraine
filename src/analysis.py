@@ -244,10 +244,21 @@ def oblast_raion_treemap(df: pd.DataFrame, metric: str = "total_hours") -> pd.Da
     """
     rows = []
     for oblast, grp in df.groupby("oblast"):
-        labels = grp["raion"].fillna("(oblast-wide)").replace("", "(oblast-wide)")
-        for raion_label, sub in grp.groupby(labels):
+        # Oblast-wide rows (empty raion) are merged INTO each raion's intervals
+        # so their time is distributed across raions rather than shown separately.
+        obl_wide = grp[grp["raion"].fillna("").eq("")]
+        raion_rows = grp[grp["raion"].fillna("").ne("")]
+        if raion_rows.empty:
             merged = merge_intervals(
-                sub["started_at"].tolist(), sub["finished_at"].tolist()
+                grp["started_at"].tolist(), grp["finished_at"].tolist(),
+            )
+            value = len(merged) if metric == "alert_count" else total_hours_from_merged(merged)
+            rows.append({"oblast": oblast, "raion": oblast, "value": value})
+            continue
+        for raion_label, sub in raion_rows.groupby("raion"):
+            combined = pd.concat([sub, obl_wide])
+            merged = merge_intervals(
+                combined["started_at"].tolist(), combined["finished_at"].tolist(),
             )
             value = len(merged) if metric == "alert_count" else total_hours_from_merged(merged)
             rows.append({"oblast": oblast, "raion": raion_label, "value": value})

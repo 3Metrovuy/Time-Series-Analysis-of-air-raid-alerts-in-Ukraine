@@ -116,3 +116,13 @@ Verified: compile OK, bare-mode run exit 0.
 *User:* Confirmed the drill-down behavior (all-Ukraine → oblasts → click expands to raions, no need to switch to Raion level; selected oblast painted blue, chart shows all of Ukraine), and asked to change the rectangle chart into a round "pie" chart while keeping the same features.
 
 **Response:** Swapped both `px.treemap`s for `px.sunburst` (the round, hierarchical equivalent — a plain pie can't drill down). Same `path=["oblast","raion"]`, `maxdepth=1`, blue selected-oblast highlight, and colour scale, so all behaviors carry over: oblasts first, click a slice to expand into raions, selected oblast highlighted blue, chart shows all of Ukraine. Verified compile OK + bare-mode run exit 0.
+
+## Turn 13
+*User:* Final tweak: in the pie chart, change numbers under each oblast to percentage (rounded to nearest tenth); collapse small oblasts after Cherkaska into one slice ("west regions" or similar), except keep Kyiv City separate.
+
+**Response:** Replaced the treemap with a `px.pie` chart. Each slice shows oblast name + percentage (e.g. "18.7%") via `texttemplate="%{label}<br>%{percent:.1%}"`. Oblasts below Cherkaska's value (Odeska, Zhytomyrska, Vinnytska, Khmelnytska, Rivnenska, Ternopilska, Chernivetska, Volynska, Ivano-Frankivska, Lvivska, Zakarpatska, Luhanska) collapsed into "Other regions" (~12% combined); Kyiv City kept as its own slice. Used "Other regions" instead of "West regions" because the group includes southern (Odeska), northern (Zhytomyrska), and eastern (Luhanska) oblasts. Selected oblast's slice pulls outward for highlighting. Removed unused `oblast_raion_treemap` import and `cx_treemap` cache function.
+
+## Turn 14
+*User:* Asked to look at the sunburst chart and suggest improvements, then implement all except showing actual values on segments (#3).
+
+**Response:** Identified 6 improvements; implemented 5: (1) added a custom `hovertemplate` showing bold name, formatted value with units (hours/episodes), and percentage — with `<extra></extra>` to suppress the root node's hover; (2) replaced the OrRd heat-scale with a qualitative palette (Alphabet + Dark24) so each oblast gets a distinct color, with child raion nodes using a lightened version of their parent's color; (4) added `insidetextorientation="radial"` and `textfont.minsize=8` so small-segment labels rotate to fit instead of disappearing; (5) simplified the selected-oblast highlight loop to use set intersection on `t_ids` directly instead of re-extracting them from the figure object; (6) root node hover suppressed via empty string in `t_hover[0]`.

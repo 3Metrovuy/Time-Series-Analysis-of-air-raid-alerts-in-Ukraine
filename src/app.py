@@ -1,3 +1,6 @@
+import colorsys
+import re as _re
+
 import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
@@ -205,29 +208,133 @@ col4.metric(
 
 unit_label = "hours under alert" if metric_key == "total_hours" else "alert episodes"
 
-# All-Ukraine treemap — click an oblast to drill into its raions
+# Sunburst chart — click to drill down; oblasts < 4.2% grouped under "Other"
 tree_df = cx_treemap(year_range, metric_key)
-fig_tree = px.treemap(
-    tree_df,
-    path=[px.Constant("Ukraine"), "oblast", "raion"],
-    values="value",
-    color="value",
-    color_continuous_scale="OrRd",
-    title=f"{unit_label.capitalize()} by oblast — click an oblast to see its raions",
+oblast_sums = tree_df.groupby("oblast")["value"].sum()
+total_value = oblast_sums.sum()
+pct_threshold = total_value * 0.042
+
+big_oblasts = sorted(o for o in oblast_sums.index if oblast_sums[o] >= pct_threshold)
+if "Kyiv City" not in big_oblasts:
+    big_oblasts.append("Kyiv City")
+    big_oblasts.sort()
+small_oblasts = sorted(o for o in oblast_sums.index if o not in big_oblasts)
+
+# Root node needed for drill-down; transparent + no text so center is invisible.
+t_ids, t_lbl, t_par, t_val = ["Ukraine"], [""], [""], [float(total_value)]
+t_text = [""]
+
+for obl in big_oblasts:
+    pct = float(oblast_sums[obl]) / total_value * 100
+    t_ids.append(obl)
+    t_lbl.append(obl)
+    t_par.append("Ukraine")
+    t_val.append(float(oblast_sums[obl]))
+    t_text.append(f"{obl}<br>{pct:.1f}%")
+    for _, row in tree_df[tree_df["oblast"] == obl].iterrows():
+        rpct = row["value"] / total_value * 100
+        t_ids.append(f"{obl}/{row['raion']}")
+        t_lbl.append(row["raion"])
+        t_par.append(obl)
+        t_val.append(row["value"])
+        t_text.append(f"{row['raion']}<br>{rpct:.1f}%")
+
+if small_oblasts:
+    other_total = float(sum(oblast_sums[o] for o in small_oblasts))
+    other_pct = other_total / total_value * 100
+    t_ids.append("Other")
+    t_lbl.append("Other")
+    t_par.append("Ukraine")
+    t_val.append(other_total)
+    t_text.append(f"Other<br>{other_pct:.1f}%")
+    for obl in small_oblasts:
+        pct = float(oblast_sums[obl]) / total_value * 100
+        obl_id = f"Other/{obl}"
+        t_ids.append(obl_id)
+        t_lbl.append(obl)
+        t_par.append("Other")
+        t_val.append(float(oblast_sums[obl]))
+        t_text.append(f"{obl}<br>{pct:.1f}%")
+        for _, row in tree_df[tree_df["oblast"] == obl].iterrows():
+            rpct = row["value"] / total_value * 100
+            t_ids.append(f"{obl_id}/{row['raion']}")
+            t_lbl.append(row["raion"])
+            t_par.append(obl_id)
+            t_val.append(row["value"])
+            t_text.append(f"{row['raion']}<br>{rpct:.1f}%")
+
+# Qualitative palette — distinct colors per oblast, transparent root
+_qual_base = px.colors.qualitative.Alphabet + px.colors.qualitative.Dark24
+oblast_nodes = [i for i, p in enumerate(t_par) if p == "Ukraine"]
+oblast_color_map = {}
+for ci, idx in enumerate(oblast_nodes):
+    oblast_color_map[t_ids[idx]] = _qual_base[ci % len(_qual_base)]
+
+def _lighten(hex_or_rgb, factor=0.45):
+    """Return a lightened version of a CSS color for child nodes."""
+    m = _re.match(r"#([0-9a-fA-F]{6})", hex_or_rgb)
+    if m:
+        r, g, b = (int(m.group(1)[i:i+2], 16) / 255 for i in (0, 2, 4))
+    else:
+        nums = _re.findall(r"[\d.]+", hex_or_rgb)
+        if len(nums) >= 3:
+            r, g, b = float(nums[0]) / 255, float(nums[1]) / 255, float(nums[2]) / 255
+        else:
+            return hex_or_rgb
+    h, l, s = colorsys.rgb_to_hls(r, g, b)
+    l = min(l + (1 - l) * factor, 0.95)
+    r2, g2, b2 = colorsys.hls_to_rgb(h, l, s)
+    return f"rgb({int(r2*255)},{int(g2*255)},{int(b2*255)})"
+
+colors = ["rgba(0,0,0,0)"] * len(t_ids)
+for idx in range(1, len(t_ids)):
+    parent = t_par[idx]
+    if parent == "Ukraine":
+        colors[idx] = oblast_color_map.get(t_ids[idx], "#ccc")
+    else:
+        ancestor = parent.split("/")[0] if "/" in parent else parent
+        base = oblast_color_map.get(ancestor, "#ccc")
+        colors[idx] = _lighten(base)
+
+hover_unit = "hours" if metric_key == "total_hours" else "episodes"
+t_hover = [
+    "" if i == 0
+    else f"<b>{t_lbl[i]}</b><br>{t_val[i]:,.0f} {hover_unit}<br>{t_val[i]/total_value*100:.1f}% of total<extra></extra>"
+    for i in range(len(t_ids))
+]
+
+fig_tree = go.Figure(go.Sunburst(
+    ids=t_ids,
+    labels=t_lbl,
+    parents=t_par,
+    values=t_val,
+    text=t_text,
+    branchvalues="total",
+    textinfo="text",
+    maxdepth=2,
+    marker=dict(colors=colors),
+    hovertemplate=t_hover,
+    insidetextorientation="radial",
+))
+fig_tree.update_layout(
+    title=f"{unit_label.capitalize()} by oblast — click to drill down ({year_range[0]}–{year_range[1]})",
+    margin=dict(t=50, l=0, r=0, b=0),
+    height=620,
 )
-fig_tree.update_traces(textinfo="label+value+percent parent", maxdepth=2)
-fig_tree.update_layout(margin=dict(t=50, l=0, r=0, b=0), height=620)
 
 if oblast_filter is not None:
-    ids = list(fig_tree.data[0].ids)
-    widths, colors = [], []
-    for node in ids:
-        parts = str(node).split("/")
-        on_branch = oblast_filter in parts
+    small_set = set(small_oblasts)
+    filter_parts = {oblast_filter, "Other"}
+    widths, line_colors = [], []
+    for node in t_ids:
+        node_parts = set(str(node).split("/"))
+        on_branch = bool(node_parts & {oblast_filter})
+        if not on_branch and node == "Other" and oblast_filter in small_set:
+            on_branch = True
         widths.append(4 if on_branch else 0.5)
-        colors.append("#1c83e1" if on_branch else "rgba(0,0,0,0.1)")
+        line_colors.append("#1c83e1" if on_branch else "rgba(0,0,0,0.1)")
     fig_tree.data[0].marker.line.width = widths
-    fig_tree.data[0].marker.line.color = colors
+    fig_tree.data[0].marker.line.color = line_colors
 
 st.plotly_chart(fig_tree, use_container_width=True)
 
