@@ -16,7 +16,7 @@ PERMANENT_SIREN_HROMADAS = {
 }
 
 NIGHT_START = 22
-NIGHT_END = 6
+NIGHT_END = 3
 
 
 def _find_csv() -> str:

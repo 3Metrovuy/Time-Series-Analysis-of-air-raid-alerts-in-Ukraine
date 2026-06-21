@@ -136,15 +136,31 @@ def alerts_by_year(df: pd.DataFrame, oblast: str | None = None) -> pd.DataFrame:
 
 
 def yearly_union_hours(df: pd.DataFrame, oblast: str | None = None) -> pd.DataFrame:
-    """Per-year union hours — splits intervals at year boundaries."""
+    """Per-year union hours, with intervals CLIPPED at year boundaries.
+
+    We union the scope's intervals once, then split each merged interval at
+    Jan-1 boundaries and attribute its hours to the correct calendar year (Kyiv
+    local). Clipping is what keeps a year's total bounded by the hours in that
+    year — without it, an interval spanning New Year leaks into the wrong year and
+    a country-wide union can read as >8760 h ("more than a year"), which is wrong.
+    """
     subset = df if oblast is None else df[df["oblast"] == oblast]
-    results = []
-    for year, grp in subset.groupby("year"):
-        merged = merge_intervals(
-            grp["started_at"].tolist(), grp["finished_at"].tolist()
-        )
-        results.append({"year": year, "union_hours": total_hours_from_merged(merged)})
-    return pd.DataFrame(results)
+    if subset.empty:
+        return pd.DataFrame(columns=["year", "union_hours"])
+
+    merged = merge_intervals(
+        subset["started_at_kyiv"].tolist(), subset["finished_at_kyiv"].tolist()
+    )
+    acc: dict = {}
+    for s, e in merged:
+        cur = s
+        while cur < e:
+            y = cur.year
+            year_end = pd.Timestamp(year=y + 1, month=1, day=1, tz=cur.tz)
+            seg_end = min(e, year_end)
+            acc[y] = acc.get(y, 0.0) + (seg_end - cur).total_seconds() / 3600
+            cur = seg_end
+    return pd.DataFrame(sorted(acc.items()), columns=["year", "union_hours"])
 
 
 # ---------------------------------------------------------------------------
@@ -158,25 +174,123 @@ def daily_time_series(
 ) -> pd.DataFrame:
     """Daily alert count or hours with 7-day rolling average.
 
+    Both metrics are computed on the *union* of intervals for the scope, so the
+    series is correct even for "All of Ukraine" (overlapping regional alerts are
+    merged, never double-counted):
+    - 'count': number of distinct union episodes whose Kyiv-local start is that day.
+    - 'hours': day-clipped union hours (each merged interval is split at local
+      midnight and its hours attributed to the day they fall in). This is bounded
+      by 24 h/day by construction, which the naive row-sum was not.
+
     metric: 'count' or 'hours'
     """
     subset = df if oblast is None else df[df["oblast"] == oblast]
-    subset = subset.copy()
-    subset["date"] = subset["started_at_kyiv"].dt.date
+    empty = pd.DataFrame(columns=["date", "value", "rolling_7d"])
+    if subset.empty:
+        return empty
+
+    merged = merge_intervals(
+        subset["started_at_kyiv"].tolist(), subset["finished_at_kyiv"].tolist()
+    )
+    if not merged:
+        return empty
 
     if metric == "count":
-        daily = subset.groupby("date").size().reset_index(name="value")
+        acc: dict = {}
+        for s, _e in merged:
+            d = s.date()
+            acc[d] = acc.get(d, 0) + 1
     else:
-        daily = subset.groupby("date")["duration_min"].sum().reset_index()
-        daily["value"] = daily["duration_min"] / 60
-        daily = daily.drop(columns=["duration_min"])
+        acc = {}
+        one_day = pd.DateOffset(days=1)  # calendar day (DST-aware), not fixed 24h
+        for s, e in merged:
+            cur = s
+            while cur < e:
+                day_start = cur.normalize()
+                next_midnight = day_start + one_day  # true next local midnight
+                seg_end = min(e, next_midnight)
+                acc[day_start.date()] = (
+                    acc.get(day_start.date(), 0.0)
+                    + (seg_end - cur).total_seconds() / 3600
+                )
+                cur = seg_end
+
+    daily = pd.DataFrame({"date": list(acc.keys()), "value": list(acc.values())})
+    daily["date"] = pd.to_datetime(daily["date"])
+    daily = daily.sort_values("date")
 
     date_range = pd.date_range(daily["date"].min(), daily["date"].max(), freq="D")
-    daily["date"] = pd.to_datetime(daily["date"])
-    daily = daily.set_index("date").reindex(date_range, fill_value=0).rename_axis("date").reset_index()
+    daily = (
+        daily.set_index("date")
+        .reindex(date_range, fill_value=0)
+        .rename_axis("date")
+        .reset_index()
+    )
 
     daily["rolling_7d"] = daily["value"].rolling(7, min_periods=1).mean()
     return daily
+
+
+def oblast_raion_treemap(df: pd.DataFrame, metric: str = "total_hours") -> pd.DataFrame:
+    """Long-form data for a two-level (oblast -> raion) drill-down treemap.
+
+    Each leaf is one (oblast, raion) with its OWN union value, so a raion never
+    double-counts its overlapping oblast/raion/hromada rows. The treemap sums
+    leaves to the oblast box; that oblast total approximates (but is not exactly)
+    the true oblast union, because oblast-wide rows can overlap raion rows across
+    levels. Rows with no raion (oblast-level alerts) are grouped as "(oblast-wide)".
+
+    metric: 'total_hours' (union hours) or 'alert_count' (union episodes).
+    """
+    rows = []
+    for oblast, grp in df.groupby("oblast"):
+        labels = grp["raion"].fillna("(oblast-wide)").replace("", "(oblast-wide)")
+        for raion_label, sub in grp.groupby(labels):
+            merged = merge_intervals(
+                sub["started_at"].tolist(), sub["finished_at"].tolist()
+            )
+            value = len(merged) if metric == "alert_count" else total_hours_from_merged(merged)
+            rows.append({"oblast": oblast, "raion": raion_label, "value": value})
+    return pd.DataFrame(rows)
+
+
+def union_night_hours(
+    df: pd.DataFrame,
+    oblast: str | None = None,
+    night_start: int = 22,
+    night_end: int = 3,
+) -> float:
+    """Union alert-hours that fall inside the night window [night_start, night_end).
+
+    Unions the scope's intervals first (no double-count), then sums, per merged
+    interval, the overlap with each day's two night sub-windows:
+    [00:00, night_end) and [night_start, 24:00). Computed on Kyiv-local time.
+    """
+    subset = df if oblast is None else df[df["oblast"] == oblast]
+    if subset.empty:
+        return 0.0
+    merged = merge_intervals(
+        subset["started_at_kyiv"].tolist(), subset["finished_at_kyiv"].tolist()
+    )
+    one_day = pd.DateOffset(days=1)  # calendar day (DST-aware), not fixed 24h
+    total = 0.0
+    for s, e in merged:
+        cur = s
+        while cur < e:
+            day_start = cur.normalize()
+            next_midnight = day_start + one_day  # true next local midnight
+            seg_end = min(e, next_midnight)
+            windows = (
+                (day_start, day_start + pd.Timedelta(hours=night_end)),
+                (day_start + pd.Timedelta(hours=night_start), next_midnight),
+            )
+            for ws, we in windows:
+                ov_s = max(cur, ws)
+                ov_e = min(seg_end, we)
+                if ov_e > ov_s:
+                    total += (ov_e - ov_s).total_seconds() / 3600
+            cur = seg_end
+    return total
 
 
 # ---------------------------------------------------------------------------
