@@ -37,6 +37,26 @@ uv run streamlit run src/app.py
 
 Open http://localhost:8501 in your browser.
 
+## Features
+
+### Landing summary
+- **Headline metrics** — total hours under alert, alert episodes, average duration, and night-hours (22:00–06:00 Kyiv time), all computed with interval-union logic so overlapping alerts are never double-counted.
+- **Interactive sunburst chart** — alert burden by oblast with drill-down into raions; oblasts under 4.2% grouped as "Other" for readability. Click any segment to zoom in.
+- **Yearly bar chart** — total hours under alert per year for the selected oblast.
+
+### Interactive exploration
+- **Sidebar controls** — filter by analysis level (oblast / raion), region, year range, metric (alert count vs. total hours), and breakdown dimension.
+- **Breakdown charts** — bar charts by weekday, hour of day, month, season, or year with automatic safest / most dangerous callouts.
+- **Oblast ranking** — horizontal bar chart ranking all 25 oblasts by the chosen metric.
+
+### Time series
+- **Daily time series** — daily alert count or hours with a 7-day rolling average overlay.
+- **Weekday × Hour heatmap** — color-coded grid showing alert patterns by day and hour (Kyiv local time with proper DST handling).
+
+### Raion-level detail
+- **Raion mode** — switch to per-raion granularity for any oblast (dense raion data available from Dec 2025 onward).
+- **Coverage metric** — time-weighted fraction of an oblast's raions simultaneously under alert (0–1 scale).
+
 ## Data source
 
 **Dataset:** `Vadimkin/ukrainian-air-raid-sirens-dataset` (official subset).

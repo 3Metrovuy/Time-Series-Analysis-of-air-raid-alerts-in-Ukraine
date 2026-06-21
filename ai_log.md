@@ -126,3 +126,8 @@ Verified: compile OK, bare-mode run exit 0.
 *User:* Asked to look at the sunburst chart and suggest improvements, then implement all except showing actual values on segments (#3).
 
 **Response:** Identified 6 improvements; implemented 5: (1) added a custom `hovertemplate` showing bold name, formatted value with units (hours/episodes), and percentage — with `<extra></extra>` to suppress the root node's hover; (2) replaced the OrRd heat-scale with a qualitative palette (Alphabet + Dark24) so each oblast gets a distinct color, with child raion nodes using a lightened version of their parent's color; (4) added `insidetextorientation="radial"` and `textfont.minsize=8` so small-segment labels rotate to fit instead of disappearing; (5) simplified the selected-oblast highlight loop to use set intersection on `t_ids` directly instead of re-extracting them from the figure object; (6) root node hover suppressed via empty string in `t_hover[0]`.
+
+## Turn 15
+*User:* Asked to add a features section to the README describing the website's capabilities.
+
+**Response:** Added a "Features" section to README.md with four subsections: Landing summary (headline metrics, sunburst chart, yearly bar), Interactive exploration (sidebar controls, breakdown charts, oblast ranking), Time series (daily series with rolling average, weekday×hour heatmap), and Raion-level detail (raion mode, coverage metric).
